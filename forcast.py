@@ -23,15 +23,15 @@ def plot_forecast_plotly(df_history, forecast_df, buffer_percent):
         line=dict(color='rgba(255,255,255,0)'), hoverinfo="skip",
         showlegend=True, name='Confidence Interval'))
 
-    fig.update_layout(title='Forecast with Confidence Interval and Recommended Balance',
-                      xaxis_title='Date', yaxis_title='SumValue',
+    fig.update_layout(title='Weekly Forecast with Confidence Interval & Recommended Balance',
+                      xaxis_title='Week', yaxis_title='SumValue (Weekly)',
                       legend=dict(x=0, y=1), template='plotly_white', hovermode="x unified")
     return fig
 
 
 # ========== Streamlit UI ==========
-st.set_page_config(page_title="Forex Balance Forecast", layout="wide")
-st.title("💱 Forex Currency Balance Forecast")
+st.set_page_config(page_title="Forex Balance Forecast (Weekly)", layout="wide")
+st.title("📅 Weekly Forex Currency Balance Forecast")
 
 uploaded_file = st.file_uploader("📂 Upload CSV file (Date, Currency, SumValue[, Forecast_Balance])", type=["csv"])
 buffer_percent = st.slider("Select buffer percentage (%)", 0, 50, 10)
@@ -52,19 +52,24 @@ if uploaded_file:
         forecast_append = []
 
         for currency in df['Currency'].unique():
-            st.markdown(f"### 🔮 Forecast for {currency}")
-            df_currency = df[df['Currency'] == currency][['Date', 'SumValue']].rename(columns={'Date': 'ds', 'SumValue': 'y'})
+            st.markdown(f"### 🔮 Weekly Forecast for {currency}")
+            df_currency = df[df['Currency'] == currency][['Date', 'SumValue']]
+
+            # ---------- AGGREGATE TO WEEKLY ----------
+            df_currency = df_currency.resample('W', on='Date').sum().reset_index()
+            df_currency = df_currency.rename(columns={'Date': 'ds', 'SumValue': 'y'})
 
             if len(df_currency) < 4:
-                st.warning(f"Not enough data to forecast for {currency}. Skipping.")
+                st.warning(f"Not enough data to forecast weekly for {currency}. Skipping.")
                 continue
 
             # ---------- SELF-LEARNING LOGIC ----------
             adjustment_factor = 1.0
             if 'Forecast_Balance' in df.columns:
                 df_forecast_compare = df[df['Currency'] == currency].dropna(subset=['Forecast_Balance'])
-                df_forecast_compare = df_forecast_compare[df_forecast_compare['Forecast_Balance'] > 0]  # avoid divide by zero
+                df_forecast_compare = df_forecast_compare[df_forecast_compare['Forecast_Balance'] > 0]
                 if not df_forecast_compare.empty:
+                    df_forecast_compare = df_forecast_compare.resample('W', on='Date').sum()
                     df_forecast_compare['error'] = (
                         (df_forecast_compare['SumValue'] - df_forecast_compare['Forecast_Balance']) /
                         df_forecast_compare['Forecast_Balance']
@@ -72,7 +77,7 @@ if uploaded_file:
                     mean_bias = df_forecast_compare['error'].mean()
                     if pd.notna(mean_bias) and mean_bias not in [float('inf'), float('-inf')]:
                         adjustment_factor = 1 + mean_bias
-                        st.info(f"📈 Historical bias detected for {currency}: {mean_bias:.2%}. Adjusting new forecast by {adjustment_factor:.2f}x.")
+                        st.info(f"📈 Weekly bias detected for {currency}: {mean_bias:.2%}. Adjusting forecast by {adjustment_factor:.2f}x.")
                     else:
                         st.warning(f"⚠️ Skipping bias adjustment for {currency} due to invalid forecast data.")
 
@@ -80,38 +85,36 @@ if uploaded_file:
             df_currency['cap'] = df_currency['y'].max() * 1.5
             df_currency['floor'] = 0
 
-            model = Prophet(growth='logistic', weekly_seasonality=True, yearly_seasonality=False)
+            model = Prophet(growth='logistic', weekly_seasonality=False, yearly_seasonality=True)
             model.fit(df_currency)
 
-            future = model.make_future_dataframe(periods=7, freq='D')
+            future = model.make_future_dataframe(periods=4, freq='W')
             future['cap'] = df_currency['cap'].iloc[0]
             future['floor'] = 0
 
             forecast = model.predict(future)
 
-            # Clip negative predictions and apply adjustment
             forecast['yhat'] = forecast['yhat'].clip(lower=0) * adjustment_factor
             forecast['yhat_lower'] = forecast['yhat_lower'].clip(lower=0) * adjustment_factor
             forecast['yhat_upper'] = forecast['yhat_upper'].clip(lower=0) * adjustment_factor
 
-            forecast_7days = forecast[forecast['ds'] > df_currency['ds'].max()].copy()
-            forecast_7days['Recommended_Balance'] = forecast_7days['yhat'] * (1 + buffer_percent / 100)
+            forecast_4weeks = forecast[forecast['ds'] > df_currency['ds'].max()].copy()
+            forecast_4weeks['Recommended_Balance'] = forecast_4weeks['yhat'] * (1 + buffer_percent / 100)
 
-            # Add last known actual value
             last_actual = df_currency['y'].iloc[-1]
-            forecast_7days['Last_Actual'] = last_actual
+            forecast_4weeks['Last_Actual'] = last_actual
 
-            forecast_display = forecast_7days[['ds', 'Last_Actual', 'yhat', 'yhat_lower', 'yhat_upper', 'Recommended_Balance']].copy()
+            forecast_display = forecast_4weeks[['ds', 'Last_Actual', 'yhat', 'yhat_lower', 'yhat_upper', 'Recommended_Balance']].copy()
             forecast_display = forecast_display.rename(columns={
-                'ds': 'Date', 'Last_Actual': 'Actual_Used', 'yhat': 'Predicted',
+                'ds': 'Week_Start', 'Last_Actual': 'Actual_Used', 'yhat': 'Predicted',
                 'yhat_lower': 'Lower_Bound', 'yhat_upper': 'Upper_Bound'
             })
             forecast_display = forecast_display.round(2)
 
-            st.write(f"Forecast table for next 7 days for {currency}:")
+            st.write(f"Forecast table for next 4 weeks for {currency}:")
             st.dataframe(forecast_display)
 
-            for _, row in forecast_7days.iterrows():
+            for _, row in forecast_4weeks.iterrows():
                 forecast_append.append({
                     "Date": row['ds'],
                     "Currency": currency,
@@ -119,10 +122,10 @@ if uploaded_file:
                     "Forecast_Balance": round(row['Recommended_Balance'], 2)
                 })
 
-            total_recommended = forecast_7days['Recommended_Balance'].sum()
+            total_recommended = forecast_4weeks['Recommended_Balance'].sum()
             results.append({
                 "Currency": currency,
-                "Total_Recommended_Balance_7days": round(total_recommended, 2)
+                "Total_Recommended_Balance_4weeks": round(total_recommended, 2)
             })
 
             fig = plot_forecast_plotly(df_currency, forecast, buffer_percent)
@@ -130,20 +133,20 @@ if uploaded_file:
 
         if results:
             results_df = pd.DataFrame(results)
-            st.subheader("📌 Summary: Total Recommended Balance Over Next 7 Days (Per Currency)")
+            st.subheader("📌 Summary: Total Recommended Balance Over Next 4 Weeks (Per Currency)")
             st.dataframe(results_df)
 
-            grand_total = results_df['Total_Recommended_Balance_7days'].sum()
-            st.markdown(f"## 🏦 **Total Recommended Balance for Next 7 Days:** {grand_total:,.2f}")
+            grand_total = results_df['Total_Recommended_Balance_4weeks'].sum()
+            st.markdown(f"## 🏦 **Total Recommended Balance for Next 4 Weeks:** {grand_total:,.2f}")
 
             df['Forecast_Balance'] = None
             forecast_df = pd.DataFrame(forecast_append)
             combined_df = pd.concat([df, forecast_df], ignore_index=True)
 
             st.download_button(
-                label="💾 Download Full CSV (Actual + 7-day Forecast)",
+                label="💾 Download Full CSV (Actual + 4-week Forecast)",
                 data=combined_df.to_csv(index=False),
-                file_name="forecast_appended.csv",
+                file_name="weekly_forecast_appended.csv",
                 mime="text/csv"
             )
 
