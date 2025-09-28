@@ -28,7 +28,6 @@ def plot_forecast_plotly(df_history, forecast_df, buffer_percent):
                       legend=dict(x=0, y=1), template='plotly_white', hovermode="x unified")
     return fig
 
-
 # ========== Streamlit UI ==========
 st.set_page_config(page_title="Forex Balance Forecast", layout="wide")
 st.title("💱 Forex Currency Balance Forecast")
@@ -60,15 +59,24 @@ if uploaded_file:
                 st.warning(f"Not enough data to forecast for {currency}. Skipping.")
                 continue
 
-            # ---------- SELF-LEARNING LOGIC ----------
+            # ---------- SELF-LEARNING LOGIC (FIXED) ----------
             adjustment_factor = 1.0
             if 'Forecast_Balance' in df.columns:
                 df_forecast_compare = df[df['Currency'] == currency].dropna(subset=['Forecast_Balance'])
+                df_forecast_compare = df_forecast_compare[df_forecast_compare['Forecast_Balance'] > 0]  # Avoid divide by zero
                 if not df_forecast_compare.empty:
-                    df_forecast_compare['error'] = (df_forecast_compare['SumValue'] - df_forecast_compare['Forecast_Balance']) / df_forecast_compare['Forecast_Balance']
+                    df_forecast_compare['error'] = (
+                        (df_forecast_compare['SumValue'] - df_forecast_compare['Forecast_Balance']) /
+                        df_forecast_compare['Forecast_Balance']
+                    )
                     mean_bias = df_forecast_compare['error'].mean()
-                    adjustment_factor = 1 + mean_bias
-                    st.info(f"📈 Historical bias detected for {currency}: {mean_bias:.2%}. Adjusting new forecast by {adjustment_factor:.2f}x.")
+
+                    # ✅ Handle NaN/inf cases safely
+                    if pd.notna(mean_bias) and mean_bias != float('inf') and mean_bias != float('-inf'):
+                        adjustment_factor = 1 + mean_bias
+                        st.info(f"📈 Historical bias detected for {currency}: {mean_bias:.2%}. Adjusting new forecast by {adjustment_factor:.2f}x.")
+                    else:
+                        st.warning(f"⚠️ Skipping bias adjustment for {currency} due to invalid or zero forecast data.")
 
             # ---------- MODEL FITTING ----------
             df_currency['cap'] = df_currency['y'].max() * 1.5
@@ -83,7 +91,7 @@ if uploaded_file:
 
             forecast = model.predict(future)
 
-            # Clip negative predictions
+            # Clip negative predictions and apply adjustment factor
             forecast['yhat'] = forecast['yhat'].clip(lower=0) * adjustment_factor
             forecast['yhat_lower'] = forecast['yhat_lower'].clip(lower=0) * adjustment_factor
             forecast['yhat_upper'] = forecast['yhat_upper'].clip(lower=0) * adjustment_factor
