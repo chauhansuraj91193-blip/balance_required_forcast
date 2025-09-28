@@ -19,10 +19,11 @@ def plot_forecast_plotly(df_history, forecast_df, buffer_percent):
                              mode='lines', name='Recommended (+buffer)',
                              line=dict(color='green', dash='dash')))
     
-    if 'yhat1_lower' in forecast_df.columns and 'yhat1_upper' in forecast_df.columns:
+    # Use quantiles instead of yhat1_lower/upper
+    if 'yhat1_0.05' in forecast_df.columns and 'yhat1_0.95' in forecast_df.columns:
         fig.add_trace(go.Scatter(
             x=forecast_df['ds'].tolist() + forecast_df['ds'][::-1].tolist(),
-            y=forecast_df['yhat1_upper'].tolist() + forecast_df['yhat1_lower'][::-1].tolist(),
+            y=forecast_df['yhat1_0.95'].tolist() + forecast_df['yhat1_0.05'][::-1].tolist(),
             fill='toself', fillcolor='rgba(255,165,0,0.2)',
             line=dict(color='rgba(255,255,255,0)'), hoverinfo="skip",
             showlegend=True, name='Confidence Interval'
@@ -74,11 +75,10 @@ if uploaded_file:
                     if pd.notna(mean_bias) and mean_bias not in [float('inf'), float('-inf')]:
                         adjustment_factor = 1 + mean_bias
                         st.info(f"📈 Historical bias detected for {currency}: {mean_bias:.2%}. Adjusting new forecast by {adjustment_factor:.2f}x.")
-                    else:
-                        st.warning(f"⚠️ Skipping bias adjustment for {currency} due to invalid forecast data.")
 
             # ---------- MODEL FITTING ----------
-            model = NeuralProphet(yearly_seasonality=False, weekly_seasonality=True, uncertainty_samples=1000)
+            # Use quantiles instead of uncertainty_samples
+            model = NeuralProphet(yearly_seasonality=False, weekly_seasonality=True, quantiles=[0.05,0.95])
             model.fit(df_currency, freq='W')
 
             future = model.make_future_dataframe(df_currency, periods=4, n_historic_predictions=False)
@@ -86,16 +86,16 @@ if uploaded_file:
 
             # Apply bias adjustment
             forecast['yhat1'] *= adjustment_factor
-            if 'yhat1_lower' in forecast.columns and 'yhat1_upper' in forecast.columns:
-                forecast['yhat1_lower'] *= adjustment_factor
-                forecast['yhat1_upper'] *= adjustment_factor
+            if 'yhat1_0.05' in forecast.columns and 'yhat1_0.95' in forecast.columns:
+                forecast['yhat1_0.05'] *= adjustment_factor
+                forecast['yhat1_0.95'] *= adjustment_factor
 
             # Recommended Balance
             forecast['Recommended_Balance'] = forecast['yhat1'] * (1 + buffer_percent / 100)
             forecast['Last_Actual'] = df_currency['y'].iloc[-1]
 
-            forecast_display = forecast[['ds','Last_Actual','yhat1','yhat1_lower','yhat1_upper','Recommended_Balance']].copy()
-            forecast_display = forecast_display.rename(columns={'ds':'Week_Start','Last_Actual':'Actual_Used','yhat1':'Predicted','yhat1_lower':'Lower_Bound','yhat1_upper':'Upper_Bound'})
+            forecast_display = forecast[['ds','Last_Actual','yhat1','yhat1_0.05','yhat1_0.95','Recommended_Balance']].copy()
+            forecast_display = forecast_display.rename(columns={'ds':'Week_Start','Last_Actual':'Actual_Used','yhat1':'Predicted','yhat1_0.05':'Lower_Bound','yhat1_0.95':'Upper_Bound'})
             forecast_display = forecast_display.round(2)
             st.dataframe(forecast_display)
 
