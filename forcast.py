@@ -28,6 +28,7 @@ def plot_forecast_plotly(df_history, forecast_df, buffer_percent):
                       legend=dict(x=0, y=1), template='plotly_white', hovermode="x unified")
     return fig
 
+
 # ========== Streamlit UI ==========
 st.set_page_config(page_title="Forex Balance Forecast", layout="wide")
 st.title("💱 Forex Currency Balance Forecast")
@@ -37,10 +38,9 @@ buffer_percent = st.slider("Select buffer percentage (%)", 0, 50, 10)
 
 if uploaded_file:
     try:
-        df = pd.read_csv(uploaded_file)
-
         # Cleaning
-df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        df = pd.read_csv(uploaded_file)
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df = df.dropna(subset=['Date', 'Currency', 'SumValue'])
         df['SumValue'] = pd.to_numeric(df['SumValue'], errors='coerce')
         df = df.dropna(subset=['SumValue'])
@@ -65,9 +65,12 @@ df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
                 df_forecast_compare = df[df['Currency'] == currency].dropna(subset=['Forecast_Balance'])
                 df_forecast_compare = df_forecast_compare[df_forecast_compare['Forecast_Balance'] > 0]  # avoid divide by zero
                 if not df_forecast_compare.empty:
-                    df_forecast_compare['error'] = (df_forecast_compare['SumValue'] - df_forecast_compare['Forecast_Balance']) / df_forecast_compare['Forecast_Balance']
+                    df_forecast_compare['error'] = (
+                        (df_forecast_compare['SumValue'] - df_forecast_compare['Forecast_Balance']) /
+                        df_forecast_compare['Forecast_Balance']
+                    )
                     mean_bias = df_forecast_compare['error'].mean()
-                    if pd.notna(mean_bias) and mean_bias != float('inf') and mean_bias != float('-inf'):
+                    if pd.notna(mean_bias) and mean_bias not in [float('inf'), float('-inf')]:
                         adjustment_factor = 1 + mean_bias
                         st.info(f"📈 Historical bias detected for {currency}: {mean_bias:.2%}. Adjusting new forecast by {adjustment_factor:.2f}x.")
                     else:
@@ -94,7 +97,7 @@ df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
             forecast_7days = forecast[forecast['ds'] > df_currency['ds'].max()].copy()
             forecast_7days['Recommended_Balance'] = forecast_7days['yhat'] * (1 + buffer_percent / 100)
 
-            # Add last known actual value for reference
+            # Add last known actual value
             last_actual = df_currency['y'].iloc[-1]
             forecast_7days['Last_Actual'] = last_actual
 
