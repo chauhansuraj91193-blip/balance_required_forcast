@@ -8,7 +8,6 @@ def plot_forecast_plotly(df_history, forecast_df, buffer_percent):
     forecast_df['Recommended_Balance'] = forecast_df['yhat'] * (1 + buffer_percent / 100)
 
     fig = go.Figure()
-
     fig.add_trace(go.Scatter(x=df_history['ds'], y=df_history['y'],
                              mode='markers+lines', name='Historical',
                              marker=dict(color='blue'), line=dict(color='blue')))
@@ -34,7 +33,7 @@ def plot_forecast_plotly(df_history, forecast_df, buffer_percent):
 st.set_page_config(page_title="Forex Balance Forecast", layout="wide")
 st.title("💱 Forex Currency Balance Forecast")
 
-uploaded_file = st.file_uploader("📂 Upload CSV file (Date, Currency, SumValue)", type=["csv"])
+uploaded_file = st.file_uploader("📂 Upload CSV file (Date, Currency, SumValue[, Forecast_Balance])", type=["csv"])
 buffer_percent = st.slider("Select buffer percentage (%)", 0, 50, 10)
 
 if uploaded_file:
@@ -61,7 +60,17 @@ if uploaded_file:
                 st.warning(f"Not enough data to forecast for {currency}. Skipping.")
                 continue
 
-            # Add logistic growth constraints
+            # ---------- SELF-LEARNING LOGIC ----------
+            adjustment_factor = 1.0
+            if 'Forecast_Balance' in df.columns:
+                df_forecast_compare = df[df['Currency'] == currency].dropna(subset=['Forecast_Balance'])
+                if not df_forecast_compare.empty:
+                    df_forecast_compare['error'] = (df_forecast_compare['SumValue'] - df_forecast_compare['Forecast_Balance']) / df_forecast_compare['Forecast_Balance']
+                    mean_bias = df_forecast_compare['error'].mean()
+                    adjustment_factor = 1 + mean_bias
+                    st.info(f"📈 Historical bias detected for {currency}: {mean_bias:.2%}. Adjusting new forecast by {adjustment_factor:.2f}x.")
+
+            # ---------- MODEL FITTING ----------
             df_currency['cap'] = df_currency['y'].max() * 1.5
             df_currency['floor'] = 0
 
@@ -74,10 +83,10 @@ if uploaded_file:
 
             forecast = model.predict(future)
 
-            # Clip any negative predictions
-            forecast['yhat'] = forecast['yhat'].clip(lower=0)
-            forecast['yhat_lower'] = forecast['yhat_lower'].clip(lower=0)
-            forecast['yhat_upper'] = forecast['yhat_upper'].clip(lower=0)
+            # Clip negative predictions
+            forecast['yhat'] = forecast['yhat'].clip(lower=0) * adjustment_factor
+            forecast['yhat_lower'] = forecast['yhat_lower'].clip(lower=0) * adjustment_factor
+            forecast['yhat_upper'] = forecast['yhat_upper'].clip(lower=0) * adjustment_factor
 
             forecast_7days = forecast[forecast['ds'] > df_currency['ds'].max()].copy()
             forecast_7days['Recommended_Balance'] = forecast_7days['yhat'] * (1 + buffer_percent / 100)
