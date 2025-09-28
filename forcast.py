@@ -4,7 +4,6 @@ import streamlit as st
 import plotly.graph_objects as go
 
 # ========== Helper function for interactive forecast plot ==========
-
 def plot_forecast_plotly(df_history, forecast_df, buffer_percent):
     forecast_df['Recommended_Balance'] = forecast_df['yhat'] * (1 + buffer_percent / 100)
 
@@ -34,8 +33,8 @@ def plot_forecast_plotly(df_history, forecast_df, buffer_percent):
                       legend=dict(x=0, y=1), template='plotly_white', hovermode="x unified")
     return fig
 
-# ========== Streamlit UI ==========
 
+# ========== Streamlit UI ==========
 st.set_page_config(page_title="Forex Balance Forecast", layout="wide")
 st.title("💱 Forex Currency Balance Forecast")
 
@@ -105,8 +104,12 @@ if uploaded_file:
 
         if results:
             results_df = pd.DataFrame(results)
-            st.subheader("📌 Summary: Total Recommended Balance Over Next 7 Days")
+            st.subheader("📌 Summary: Total Recommended Balance Over Next 7 Days (Per Currency)")
             st.dataframe(results_df)
+
+            # ✅ NEW: Combined Total for All Currencies
+            grand_total = results_df['Total_Recommended_Balance_7days'].sum()
+            st.markdown(f"## 🏦 **Total Recommended Balance for Next 7 Days:** {grand_total:,.2f}")
 
             # Build combined export (actual + forecast rows)
             df['Forecast_Balance'] = None
