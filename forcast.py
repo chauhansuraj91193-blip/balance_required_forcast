@@ -40,7 +40,7 @@ if uploaded_file:
         df = pd.read_csv(uploaded_file)
 
         # Cleaning
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df = df.dropna(subset=['Date', 'Currency', 'SumValue'])
         df['SumValue'] = pd.to_numeric(df['SumValue'], errors='coerce')
         df = df.dropna(subset=['SumValue'])
@@ -59,24 +59,19 @@ if uploaded_file:
                 st.warning(f"Not enough data to forecast for {currency}. Skipping.")
                 continue
 
-            # ---------- SELF-LEARNING LOGIC (FIXED) ----------
+            # ---------- SELF-LEARNING LOGIC ----------
             adjustment_factor = 1.0
             if 'Forecast_Balance' in df.columns:
                 df_forecast_compare = df[df['Currency'] == currency].dropna(subset=['Forecast_Balance'])
-                df_forecast_compare = df_forecast_compare[df_forecast_compare['Forecast_Balance'] > 0]  # Avoid divide by zero
+                df_forecast_compare = df_forecast_compare[df_forecast_compare['Forecast_Balance'] > 0]  # avoid divide by zero
                 if not df_forecast_compare.empty:
-                    df_forecast_compare['error'] = (
-                        (df_forecast_compare['SumValue'] - df_forecast_compare['Forecast_Balance']) /
-                        df_forecast_compare['Forecast_Balance']
-                    )
+                    df_forecast_compare['error'] = (df_forecast_compare['SumValue'] - df_forecast_compare['Forecast_Balance']) / df_forecast_compare['Forecast_Balance']
                     mean_bias = df_forecast_compare['error'].mean()
-
-                    # ✅ Handle NaN/inf cases safely
                     if pd.notna(mean_bias) and mean_bias != float('inf') and mean_bias != float('-inf'):
                         adjustment_factor = 1 + mean_bias
                         st.info(f"📈 Historical bias detected for {currency}: {mean_bias:.2%}. Adjusting new forecast by {adjustment_factor:.2f}x.")
                     else:
-                        st.warning(f"⚠️ Skipping bias adjustment for {currency} due to invalid or zero forecast data.")
+                        st.warning(f"⚠️ Skipping bias adjustment for {currency} due to invalid forecast data.")
 
             # ---------- MODEL FITTING ----------
             df_currency['cap'] = df_currency['y'].max() * 1.5
@@ -91,7 +86,7 @@ if uploaded_file:
 
             forecast = model.predict(future)
 
-            # Clip negative predictions and apply adjustment factor
+            # Clip negative predictions and apply adjustment
             forecast['yhat'] = forecast['yhat'].clip(lower=0) * adjustment_factor
             forecast['yhat_lower'] = forecast['yhat_lower'].clip(lower=0) * adjustment_factor
             forecast['yhat_upper'] = forecast['yhat_upper'].clip(lower=0) * adjustment_factor
@@ -99,9 +94,13 @@ if uploaded_file:
             forecast_7days = forecast[forecast['ds'] > df_currency['ds'].max()].copy()
             forecast_7days['Recommended_Balance'] = forecast_7days['yhat'] * (1 + buffer_percent / 100)
 
-            forecast_display = forecast_7days[['ds', 'yhat', 'yhat_lower', 'yhat_upper', 'Recommended_Balance']].copy()
+            # Add last known actual value for reference
+            last_actual = df_currency['y'].iloc[-1]
+            forecast_7days['Last_Actual'] = last_actual
+
+            forecast_display = forecast_7days[['ds', 'Last_Actual', 'yhat', 'yhat_lower', 'yhat_upper', 'Recommended_Balance']].copy()
             forecast_display = forecast_display.rename(columns={
-                'ds': 'Date', 'yhat': 'Predicted',
+                'ds': 'Date', 'Last_Actual': 'Actual_Used', 'yhat': 'Predicted',
                 'yhat_lower': 'Lower_Bound', 'yhat_upper': 'Upper_Bound'
             })
             forecast_display = forecast_display.round(2)
