@@ -3,19 +3,22 @@ from neuralprophet import NeuralProphet
 import streamlit as st
 import plotly.graph_objects as go
 
-# ========== Helper function for interactive forecast plot ==========
+# ================= Helper function =================
 def plot_forecast_plotly(df_history, forecast_df, buffer_percent):
     forecast_df['Recommended_Balance'] = forecast_df['yhat1'] * (1 + buffer_percent / 100)
     fig = go.Figure()
+    
     fig.add_trace(go.Scatter(x=df_history['ds'], y=df_history['y'],
                              mode='markers+lines', name='Historical',
                              marker=dict(color='blue'), line=dict(color='blue')))
+    
     fig.add_trace(go.Scatter(x=forecast_df['ds'], y=forecast_df['yhat1'],
                              mode='lines', name='Forecast', line=dict(color='orange')))
+    
     fig.add_trace(go.Scatter(x=forecast_df['ds'], y=forecast_df['Recommended_Balance'],
                              mode='lines', name='Recommended (+buffer)',
                              line=dict(color='green', dash='dash')))
-    # Plot prediction interval if available
+    
     if 'yhat1_lower' in forecast_df.columns and 'yhat1_upper' in forecast_df.columns:
         fig.add_trace(go.Scatter(
             x=forecast_df['ds'].tolist() + forecast_df['ds'][::-1].tolist(),
@@ -24,12 +27,13 @@ def plot_forecast_plotly(df_history, forecast_df, buffer_percent):
             line=dict(color='rgba(255,255,255,0)'), hoverinfo="skip",
             showlegend=True, name='Confidence Interval'
         ))
+        
     fig.update_layout(title='Weekly Forecast with Recommended Balance',
                       xaxis_title='Week', yaxis_title='SumValue',
                       template='plotly_white', hovermode='x unified')
     return fig
 
-# ========== Streamlit UI ==========
+# ================= Streamlit UI =================
 st.set_page_config(page_title="Weekly Forex Balance Forecast", layout="wide")
 st.title("🧠 AI-Powered Weekly Forex Balance Forecast")
 
@@ -74,12 +78,13 @@ if uploaded_file:
                         st.warning(f"⚠️ Skipping bias adjustment for {currency} due to invalid forecast data.")
 
             # ---------- MODEL FITTING ----------
-            model = NeuralProphet(yearly_seasonality=False, weekly_seasonality=True, interval_width=0.95)
+            model = NeuralProphet(yearly_seasonality=False, weekly_seasonality=True, uncertainty_samples=1000)
             model.fit(df_currency, freq='W')
+
             future = model.make_future_dataframe(df_currency, periods=4, n_historic_predictions=False)
             forecast = model.predict(future)
 
-            # Apply adjustment factor
+            # Apply bias adjustment
             forecast['yhat1'] *= adjustment_factor
             if 'yhat1_lower' in forecast.columns and 'yhat1_upper' in forecast.columns:
                 forecast['yhat1_lower'] *= adjustment_factor
@@ -87,17 +92,14 @@ if uploaded_file:
 
             # Recommended Balance
             forecast['Recommended_Balance'] = forecast['yhat1'] * (1 + buffer_percent / 100)
-
-            # Add last actual value for reference
             forecast['Last_Actual'] = df_currency['y'].iloc[-1]
 
             forecast_display = forecast[['ds','Last_Actual','yhat1','yhat1_lower','yhat1_upper','Recommended_Balance']].copy()
             forecast_display = forecast_display.rename(columns={'ds':'Week_Start','Last_Actual':'Actual_Used','yhat1':'Predicted','yhat1_lower':'Lower_Bound','yhat1_upper':'Upper_Bound'})
             forecast_display = forecast_display.round(2)
-
             st.dataframe(forecast_display)
 
-            # Append for CSV download
+            # Append for CSV
             for _, row in forecast.iterrows():
                 forecast_append.append({
                     "Date": row['ds'],
